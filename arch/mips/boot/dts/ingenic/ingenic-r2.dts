@@ -72,6 +72,20 @@
 		regulator-always-on;
 	};
 
+	/* Virtual touch supply.  The GT911 is powered from the AXP2101, but
+	 * the PMIC only probes after the i2c0 bus (and therefore Goodix) has
+	 * registered.  This pass-through regulator uses an AXP rail as its
+	 * parent purely to make Goodix defer until the PMIC rails are up;
+	 * without it the controller is unpowered and the ID read times out. */
+	tp_pwr: regulator-touch {
+		compatible = "regulator-fixed";
+		regulator-name = "TP PWR";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&aldo3>;
+		regulator-always-on;
+	};
+
 	bl_pwr: regulator-backlight {
 		compatible = "regulator-fixed";
 		regulator-name = "BL PWR";
@@ -202,13 +216,6 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pins_uart0>;
 
-	bluetooth {
-		compatible = "brcm,bcm43438-bt";
-		max-speed = <1000000>;
-		reset-gpios = <&gpc 18 GPIO_ACTIVE_LOW>;		/* GPIO 82 bt_reg_on */
-		device-wakeup-gpios = <&gpc 19 GPIO_ACTIVE_HIGH>;	/* GPIO 83 host_wake_bt */
-		host-wakeup-gpios = <&gpc 20 GPIO_ACTIVE_HIGH>;	/* GPIO 84 bt_wake_host */
-	};
 };
 
 &uart2 {
@@ -229,9 +236,10 @@
 		interrupt-parent = <&gpc>;
 		interrupts = <21 IRQ_TYPE_EDGE_FALLING>;	/* GPIO 85 */
 		irq-gpios = <&gpc 21 GPIO_ACTIVE_HIGH>;		/* GPIO 85 GTP_INT_IRQ */
-		reset-gpios = <&gpd 3 GPIO_ACTIVE_LOW>;		/* GPIO 99 */
-		AVDD28-supply = <&amp_pwr>;
-		VDDIO-supply = <&amp_pwr>;
+		/* driver drives raw 0->1: low asserts reset, high releases it */
+		reset-gpios = <&gpd 3 GPIO_ACTIVE_HIGH>;		/* GPIO 99 */
+		AVDD28-supply = <&tp_pwr>;
+		VDDIO-supply = <&tp_pwr>;
 		touchscreen-size-x = <480>;
 		touchscreen-size-y = <360>;
 	};
@@ -541,6 +549,25 @@
 &otg {
 	status = "okay";
 	dr_mode = "peripheral";
+};
+
+/* BCM4343A1: BT_REG_ON and host->chip BT_WAKE are kept high, as stock does.
+ * Firmware is loaded from userspace over /dev/ttyS0 by brcm_patchram_plus.
+ */
+&gpc {
+	bt-reg-on-hog {
+		gpio-hog;
+		gpios = <18 GPIO_ACTIVE_HIGH>;		/* GPIO 82 bt_reg_on */
+		output-high;
+		line-name = "bt_reg_on";
+	};
+
+	bt-wake-hog {
+		gpio-hog;
+		gpios = <19 GPIO_ACTIVE_HIGH>;		/* GPIO 83 host_wake_bt */
+		output-high;
+		line-name = "host_wake_bt";
+	};
 };
 
 &pinctrl {
