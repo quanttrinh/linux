@@ -326,6 +326,13 @@ config LEDS_PCA9532_GPIO
 	  To use a pin as gpio pca9532_type in pca9532_platform data needs to
 	  set to PCA9532_TYPE_GPIO.
 
+config LEDS_SGM31324
+	tristate "SGM31324 I2C LED controller"
+	depends on I2C && GPIOLIB && OF
+	select LEDS_CLASS
+	select LEDS_CLASS_MULTICOLOR
+	select REGMAP_I2C
+
 config LEDS_GPIO
 	tristate "LED Support for GPIO connected LEDs"
 	depends on LEDS_CLASS

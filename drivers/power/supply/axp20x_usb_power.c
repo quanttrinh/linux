@@ -28,6 +28,7 @@
 
 #define AXP20X_PWR_STATUS_VBUS_PRESENT	BIT(5)
 #define AXP20X_PWR_STATUS_VBUS_USED	BIT(4)
+#define AXP2101_PWR_STATUS_VBUS_GOOD	BIT(5)
 
 #define AXP20X_USB_STATUS_VBUS_VALID	BIT(2)
 
@@ -61,6 +62,18 @@
  */
 #define DEBOUNCE_TIME			msecs_to_jiffies(50)
 
+struct axp20x_usb_power;
+
+struct axp_data {
+	const struct power_supply_desc	*power_desc;
+	const char * const		*irq_names;
+	unsigned int			num_irq_names;
+	enum axp20x_variants		axp20x_id;
+	struct reg_field		curr_lim_field;
+	void				(*read_vbus)(struct work_struct *work);
+	bool				vbus_needs_polling;
+};
+
 struct axp20x_usb_power {
 	struct regmap *regmap;
 	struct power_supply *supply;
@@ -71,19 +84,16 @@ struct axp20x_usb_power {
 	unsigned int old_status;
 	unsigned int online;
 	unsigned int num_irqs;
+	const struct axp_data *data;
+	struct regmap_field *curr_lim_fld;
 	unsigned int irqs[];
 };
 
 static bool axp20x_usb_vbus_needs_polling(struct axp20x_usb_power *power)
 {
-	/*
-	 * Polling is only necessary while VBUS is offline. While online, a
-	 * present->absent transition implies an online->offline transition
-	 * and will trigger the VBUS_REMOVAL IRQ.
-	 */
-	if (power->axp20x_id >= AXP221_ID && !power->online)
-		return true;
-
+	/* AXP2101 generates IRQs on both VBUS edges, so it never polls. */
+	if (power->data)
+		return power->data->vbus_needs_polling;
 	return false;
 }
 
@@ -461,13 +471,6 @@ static const char * const axp22x_irq_names[] = {
 	"VBUS_REMOVAL",
 };
 
-struct axp_data {
-	const struct power_supply_desc	*power_desc;
-	const char * const		*irq_names;
-	unsigned int			num_irq_names;
-	enum axp20x_variants		axp20x_id;
-};
-
 static const struct axp_data axp202_data = {
 	.power_desc	= &axp20x_usb_power_desc,
 	.irq_names	= axp20x_irq_names,
@@ -476,6 +479,7 @@ static const struct axp_data axp202_data = {
 };
 
 static const struct axp_data axp221_data = {
+	.vbus_needs_polling = true,
 	.power_desc	= &axp22x_usb_power_desc,
 	.irq_names	= axp22x_irq_names,
 	.num_irq_names	= ARRAY_SIZE(axp22x_irq_names),
@@ -483,6 +487,7 @@ static const struct axp_data axp221_data = {
 };
 
 static const struct axp_data axp223_data = {
+	.vbus_needs_polling = true,
 	.power_desc	= &axp22x_usb_power_desc,
 	.irq_names	= axp22x_irq_names,
 	.num_irq_names	= ARRAY_SIZE(axp22x_irq_names),
@@ -490,10 +495,92 @@ static const struct axp_data axp223_data = {
 };
 
 static const struct axp_data axp813_data = {
+	.vbus_needs_polling = true,
 	.power_desc	= &axp22x_usb_power_desc,
 	.irq_names	= axp22x_irq_names,
 	.num_irq_names	= ARRAY_SIZE(axp22x_irq_names),
 	.axp20x_id	= AXP813_ID,
+};
+
+static void axp2101_usb_power_refresh_vbus(struct work_struct *work)
+{
+	struct axp20x_usb_power *power =
+		container_of(work, struct axp20x_usb_power, vbus_detect.work);
+	unsigned int val;
+	int ret;
+
+	ret = regmap_read(power->regmap, AXP2101_PMU_STATUS_1, &val);
+	if (!ret) {
+		val &= AXP2101_PWR_STATUS_VBUS_GOOD;
+		if (val != power->old_status)
+			power_supply_changed(power->supply);
+
+		power->old_status = val;
+		power->online = !!val;
+	}
+
+	if (axp20x_usb_vbus_needs_polling(power))
+		mod_delayed_work(system_power_efficient_wq, &power->vbus_detect,
+				 DEBOUNCE_TIME);
+}
+
+/* AXP2101: VBUS status and input-current limit from IIN_LIM. */
+static const int axp2101_curr_lim_ua[] = {
+	100000, 500000, 900000, 1000000, 1500000, 2000000,
+};
+
+static int axp2101_usb_power_get_property(struct power_supply *psy,
+						   enum power_supply_property psp,
+						   union power_supply_propval *val)
+{
+	struct axp20x_usb_power *power = power_supply_get_drvdata(psy);
+	unsigned int v;
+	int ret;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		ret = regmap_field_read(power->curr_lim_fld, &v);
+		if (ret)
+			return ret;
+		if (v >= ARRAY_SIZE(axp2101_curr_lim_ua))
+			return -EINVAL;
+		val->intval = axp2101_curr_lim_ua[v];
+		return 0;
+	case POWER_SUPPLY_PROP_ONLINE:
+	case POWER_SUPPLY_PROP_PRESENT:
+		ret = regmap_read(power->regmap, AXP2101_PMU_STATUS_1, &v);
+		if (ret)
+			return ret;
+		val->intval = !!(v & AXP2101_PWR_STATUS_VBUS_GOOD);
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
+static enum power_supply_property axp2101_usb_props[] = {
+	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_PRESENT,
+};
+
+static const struct power_supply_desc axp2101_usb_desc = {
+	.name = "axp20x-usb",
+	.type = POWER_SUPPLY_TYPE_USB,
+	.properties = axp2101_usb_props,
+	.num_properties = ARRAY_SIZE(axp2101_usb_props),
+	.get_property = axp2101_usb_power_get_property,
+};
+
+static const char *const axp2101_irq_names[] = { "VBUS_PLUGIN", "VBUS_REMOVAL" };
+
+static const struct axp_data axp2101_usb_data = {
+	.power_desc = &axp2101_usb_desc,
+	.irq_names = axp2101_irq_names,
+	.num_irq_names = ARRAY_SIZE(axp2101_irq_names),
+	.axp20x_id = AXP2101_ID,
+	.curr_lim_field = REG_FIELD(AXP2101_IIN_LIM, 0, 2),
+	.read_vbus = axp2101_usb_power_refresh_vbus,
 };
 
 #ifdef CONFIG_PM_SLEEP
@@ -591,12 +678,19 @@ static int axp20x_usb_power_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, power);
 
+	power->data = axp_data;
 	power->axp20x_id = axp_data->axp20x_id;
 	power->regmap = axp20x->regmap;
+	if (axp_data->curr_lim_field.reg) {
+		power->curr_lim_fld = devm_regmap_field_alloc(&pdev->dev,
+			power->regmap, axp_data->curr_lim_field);
+		if (IS_ERR(power->curr_lim_fld))
+			return PTR_ERR(power->curr_lim_fld);
+	}
 	power->num_irqs = axp_data->num_irq_names;
 
 	ret = devm_delayed_work_autocancel(&pdev->dev, &power->vbus_detect,
-					   axp20x_usb_power_poll_vbus);
+					   axp_data->read_vbus ?: axp20x_usb_power_poll_vbus);
 	if (ret)
 		return ret;
 
@@ -670,6 +764,9 @@ static const struct of_device_id axp20x_usb_power_match[] = {
 	}, {
 		.compatible = "x-powers,axp813-usb-power-supply",
 		.data = &axp813_data,
+	}, {
+		.compatible = "x-powers,axp2101-usb-power-supply",
+		.data = &axp2101_usb_data,
 	}, { /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, axp20x_usb_power_match);

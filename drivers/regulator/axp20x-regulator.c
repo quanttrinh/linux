@@ -1001,6 +1001,80 @@ static const struct regulator_desc axp813_regulators[] = {
 		    AXP22X_PWR_OUT_CTRL2, AXP22X_PWR_OUT_DC1SW_MASK),
 };
 
+static const struct linear_range axp2101_dcdc2_ranges[] = {
+	REGULATOR_LINEAR_RANGE(500000, 0, 70, 10000),
+	REGULATOR_LINEAR_RANGE(1220000, 71, 87, 20000),
+};
+
+static const struct linear_range axp2101_dcdc3_ranges[] = {
+	REGULATOR_LINEAR_RANGE(500000, 0, 70, 10000),
+	REGULATOR_LINEAR_RANGE(1220000, 71, 87, 20000),
+	REGULATOR_LINEAR_RANGE(1600000, 88, 106, 100000),
+};
+
+static const struct linear_range axp2101_dcdc4_ranges[] = {
+	REGULATOR_LINEAR_RANGE(500000, 0, 70, 10000),
+	REGULATOR_LINEAR_RANGE(1220000, 71, 102, 20000),
+};
+
+static const struct linear_range axp2101_dcdc5_ranges[] = {
+	REGULATOR_LINEAR_RANGE(1400000, 0, 23, 100000),
+	REGULATOR_LINEAR_RANGE(1200000, 25, 25, 0),
+};
+
+#define AXP2101_DCDC_V_OUT_MASK		GENMASK(6, 0)
+#define AXP2101_DCDC15_V_OUT_MASK	GENMASK(4, 0)
+#define AXP2101_LDO_V_OUT_MASK		GENMASK(4, 0)
+
+static const struct regulator_desc axp2101_regulators[] = {
+	AXP_DESC(AXP2101, DCDC1, "dcdc1", "vin1", 1500, 3400, 100,
+		 AXP2101_DCDC1_CONTROL, AXP2101_DCDC15_V_OUT_MASK,
+		 AXP2101_DCDC_OUTPUT_CONTROL, BIT(0)),
+	AXP_DESC_RANGES(AXP2101, DCDC2, "dcdc2", "vin2",
+			axp2101_dcdc2_ranges, 88,
+			AXP2101_DCDC2_CONTROL, AXP2101_DCDC_V_OUT_MASK,
+			AXP2101_DCDC_OUTPUT_CONTROL, BIT(1)),
+	AXP_DESC_RANGES(AXP2101, DCDC3, "dcdc3", "vin3",
+			axp2101_dcdc3_ranges, 107,
+			AXP2101_DCDC3_CONTROL, AXP2101_DCDC_V_OUT_MASK,
+			AXP2101_DCDC_OUTPUT_CONTROL, BIT(2)),
+	AXP_DESC_RANGES(AXP2101, DCDC4, "dcdc4", "vin4",
+			axp2101_dcdc4_ranges, 103,
+			AXP2101_DCDC4_CONTROL, AXP2101_DCDC_V_OUT_MASK,
+			AXP2101_DCDC_OUTPUT_CONTROL, BIT(3)),
+	AXP_DESC_RANGES(AXP2101, DCDC5, "dcdc5", "vin5",
+			axp2101_dcdc5_ranges, 26,
+			AXP2101_DCDC5_CONTROL, AXP2101_DCDC15_V_OUT_MASK,
+			AXP2101_DCDC_OUTPUT_CONTROL, BIT(4)),
+	AXP_DESC(AXP2101, ALDO1, "aldo1", "aldoin", 500, 3500, 100,
+		 AXP2101_ALDO1_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(0)),
+	AXP_DESC(AXP2101, ALDO2, "aldo2", "aldoin", 500, 3500, 100,
+		 AXP2101_ALDO2_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(1)),
+	AXP_DESC(AXP2101, ALDO3, "aldo3", "aldoin", 500, 3500, 100,
+		 AXP2101_ALDO3_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(2)),
+	AXP_DESC(AXP2101, ALDO4, "aldo4", "aldoin", 500, 3500, 100,
+		 AXP2101_ALDO4_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(3)),
+	AXP_DESC(AXP2101, BLDO1, "bldo1", "bldoin", 500, 3500, 100,
+		 AXP2101_BLDO1_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(4)),
+	AXP_DESC(AXP2101, BLDO2, "bldo2", "bldoin", 500, 3500, 100,
+		 AXP2101_BLDO2_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(5)),
+	AXP_DESC(AXP2101, DLDO1, "dldo1", "dldoin", 500, 3400, 100,
+		 AXP2101_DLDO1_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(7)),
+	AXP_DESC(AXP2101, DLDO2, "dldo2", "dldoin", 500, 1400, 50,
+		 AXP2101_DLDO2_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO1_OUTPUT_CONTROL, BIT(0)),
+	AXP_DESC(AXP2101, CPUSLDO, "cpusldo", "cpusldoin", 500, 1400, 50,
+		 AXP2101_CPUSLDO_CONTROL, AXP2101_LDO_V_OUT_MASK,
+		 AXP2101_LDO0_OUTPUT_CONTROL, BIT(6)),
+};
+
 static int axp20x_set_dcdc_freq(struct platform_device *pdev, u32 dcdcfreq)
 {
 	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
@@ -1024,6 +1098,14 @@ static int axp20x_set_dcdc_freq(struct platform_device *pdev, u32 dcdcfreq)
 		 */
 		reg = AXP803_DCDC_FREQ_CTRL;
 		fallthrough;	/* to the check below */
+	case AXP2101_ID:
+		/* Not known to be configurable. */
+		if (dcdcfreq != 0) {
+			dev_err(&pdev->dev,
+				"DCDC frequency on this PMIC is not configurable.\n");
+			return -EINVAL;
+		}
+		return 0;
 	case AXP806_ID:
 		/*
 		 * AXP806 also have DCDC work frequency setting register at a
@@ -1245,6 +1327,10 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	case AXP809_ID:
 		regulators = axp809_regulators;
 		nregulators = AXP809_REG_ID_MAX;
+		break;
+	case AXP2101_ID:
+		regulators = axp2101_regulators;
+		nregulators = AXP2101_REG_ID_MAX;
 		break;
 	case AXP813_ID:
 		regulators = axp813_regulators;

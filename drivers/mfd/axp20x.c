@@ -43,6 +43,7 @@ static const char * const axp20x_model_names[] = {
 	"AXP806",
 	"AXP809",
 	"AXP813",
+	"AXP2101",
 };
 
 static const struct regmap_range axp152_writeable_ranges[] = {
@@ -243,6 +244,41 @@ static const struct regmap_config axp152_regmap_config = {
 	.volatile_table	= &axp152_volatile_table,
 	.max_register	= AXP152_PWM1_DUTY_CYCLE,
 	.cache_type	= REGCACHE_RBTREE,
+};
+
+static const struct regmap_range axp2101_writeable_ranges[] = {
+	regmap_reg_range(AXP2101_COMM_CFG, AXP2101_LOW_BATT_WARN),
+	regmap_reg_range(AXP2101_PWROFF_EN, AXP2101_FAST_PWRON_CTRL),
+	regmap_reg_range(AXP2101_ADC_CH_EN, AXP2101_ADC_CH_EN),
+	regmap_reg_range(AXP2101_IRQ0_EN, AXP2101_IRQ2_STATE),
+	regmap_reg_range(AXP2101_TS_PIN_CFG, AXP2101_BTN_CHG_CFG),
+	regmap_reg_range(AXP2101_DCDC_OUTPUT_CONTROL, AXP2101_DLDO2_CONTROL),
+};
+
+static const struct regmap_range axp2101_volatile_ranges[] = {
+	regmap_reg_range(AXP2101_PMU_STATUS_1, AXP2101_PMU_STATUS_2),
+	regmap_reg_range(AXP2101_PWRON_STATUS, AXP2101_PWROFF_STATUS),
+	regmap_reg_range(AXP2101_BATT_V_H, AXP2101_DIE_TEMP_L),
+	regmap_reg_range(AXP2101_IRQ0_STATE, AXP2101_IRQ2_STATE),
+};
+
+static const struct regmap_access_table axp2101_writeable_table = {
+	.yes_ranges = axp2101_writeable_ranges,
+	.n_yes_ranges = ARRAY_SIZE(axp2101_writeable_ranges),
+};
+
+static const struct regmap_access_table axp2101_volatile_table = {
+	.yes_ranges = axp2101_volatile_ranges,
+	.n_yes_ranges = ARRAY_SIZE(axp2101_volatile_ranges),
+};
+
+static const struct regmap_config axp2101_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+	.wr_table = &axp2101_writeable_table,
+	.volatile_table = &axp2101_volatile_table,
+	.max_register = AXP2101_DLDO2_CONTROL,
+	.cache_type = REGCACHE_RBTREE,
 };
 
 static const struct regmap_config axp20x_regmap_config = {
@@ -514,6 +550,42 @@ static const struct regmap_irq_chip axp152_regmap_irq_chip = {
 	.num_regs		= 3,
 };
 
+static const struct regmap_irq axp2101_regmap_irqs[] = {
+	INIT_REGMAP_IRQ(AXP2101, BATT_UNDER_TEMP_WORK, 0, 0),
+	INIT_REGMAP_IRQ(AXP2101, BATT_OVER_TEMP_WORK, 0, 1),
+	INIT_REGMAP_IRQ(AXP2101, BATT_UNDER_TEMP_CHG, 0, 2),
+	INIT_REGMAP_IRQ(AXP2101, BATT_OVER_TEMP_CHG, 0, 3),
+	INIT_REGMAP_IRQ(AXP2101, SOC_DROP_LVL1, 0, 6),
+	INIT_REGMAP_IRQ(AXP2101, SOC_DROP_LVL2, 0, 7),
+	INIT_REGMAP_IRQ(AXP2101, PEK_RIS_EDGE, 1, 0),
+	INIT_REGMAP_IRQ(AXP2101, PEK_FAL_EDGE, 1, 1),
+	INIT_REGMAP_IRQ(AXP2101, PEK_LONG, 1, 2),
+	INIT_REGMAP_IRQ(AXP2101, PEK_SHORT, 1, 3),
+	INIT_REGMAP_IRQ(AXP2101, BATT_REMOVAL, 1, 4),
+	INIT_REGMAP_IRQ(AXP2101, BATT_PLUGIN, 1, 5),
+	INIT_REGMAP_IRQ(AXP2101, VBUS_REMOVAL, 1, 6),
+	INIT_REGMAP_IRQ(AXP2101, VBUS_PLUGIN, 1, 7),
+	INIT_REGMAP_IRQ(AXP2101, BATT_OVER_V, 2, 0),
+	INIT_REGMAP_IRQ(AXP2101, CHARG_TIMER, 2, 1),
+	INIT_REGMAP_IRQ(AXP2101, DIE_TEMP_HIGH, 2, 2),
+	INIT_REGMAP_IRQ(AXP2101, CHARG, 2, 3),
+	INIT_REGMAP_IRQ(AXP2101, CHARG_DONE, 2, 4),
+	INIT_REGMAP_IRQ(AXP2101, BATT_OVER_CURR, 2, 5),
+	INIT_REGMAP_IRQ(AXP2101, LDO_OVER_CURR, 2, 6),
+	INIT_REGMAP_IRQ(AXP2101, WDOG_EXPIRE, 2, 7),
+};
+
+static const struct regmap_irq_chip axp2101_regmap_irq_chip = {
+	.name = "axp2101_irq_chip",
+	.status_base = AXP2101_IRQ0_STATE,
+	.ack_base = AXP2101_IRQ0_STATE,
+	.unmask_base = AXP2101_IRQ0_EN,
+	.init_ack_masked = true,
+	.irqs = axp2101_regmap_irqs,
+	.num_irqs = ARRAY_SIZE(axp2101_regmap_irqs),
+	.num_regs = 3,
+};
+
 static const struct regmap_irq_chip axp20x_regmap_irq_chip = {
 	.name			= "axp20x_irq_chip",
 	.status_base		= AXP20X_IRQ1_STATE,
@@ -586,6 +658,19 @@ static const struct regmap_irq_chip axp809_regmap_irq_chip = {
 	.irqs			= axp809_regmap_irqs,
 	.num_irqs		= ARRAY_SIZE(axp809_regmap_irqs),
 	.num_regs		= 5,
+};
+
+static const struct resource axp2101_usb_power_resources[] = {
+	DEFINE_RES_IRQ_NAMED(AXP2101_IRQ_VBUS_PLUGIN, "VBUS_PLUGIN"),
+	DEFINE_RES_IRQ_NAMED(AXP2101_IRQ_VBUS_REMOVAL, "VBUS_REMOVAL"),
+};
+
+static const struct mfd_cell axp2101_cells[] = {
+	MFD_CELL_NAME("axp20x-regulator"),
+	MFD_CELL_OF("axp20x-usb-power-supply", axp2101_usb_power_resources,
+		    NULL, 0, 0, "x-powers,axp2101-usb-power-supply"),
+	MFD_CELL_OF("axp20x-battery-power-supply", NULL, NULL, 0, 0,
+		    "x-powers,axp2101-battery-power-supply"),
 };
 
 static const struct mfd_cell axp20x_cells[] = {
@@ -835,11 +920,19 @@ static const struct mfd_cell axp813_cells[] = {
 static struct axp20x_dev *axp20x_pm_power_off;
 static void axp20x_power_off(void)
 {
+	unsigned int shutdown_reg, shutdown_bit;
+
 	if (axp20x_pm_power_off->variant == AXP288_ID)
 		return;
 
-	regmap_write(axp20x_pm_power_off->regmap, AXP20X_OFF_CTRL,
-		     AXP20X_OFF);
+	shutdown_reg = AXP20X_OFF_CTRL;
+	shutdown_bit = AXP20X_OFF;
+	if (axp20x_pm_power_off->variant == AXP2101_ID) {
+		shutdown_reg = AXP2101_COMM_CFG;
+		shutdown_bit = AXP2101_SOFT_PWROFF;
+	}
+	regmap_set_bits(axp20x_pm_power_off->regmap, shutdown_reg,
+			shutdown_bit);
 
 	/* Give capacitors etc. time to drain to avoid kernel panic msg. */
 	mdelay(500);
@@ -899,6 +992,12 @@ int axp20x_match_device(struct axp20x_dev *axp20x)
 		axp20x->regmap_cfg = &axp288_regmap_config;
 		axp20x->regmap_irq_chip = &axp288_regmap_irq_chip;
 		axp20x->irq_flags = IRQF_TRIGGER_LOW;
+		break;
+	case AXP2101_ID:
+		axp20x->nr_cells = ARRAY_SIZE(axp2101_cells);
+		axp20x->cells = axp2101_cells;
+		axp20x->regmap_cfg = &axp2101_regmap_config;
+		axp20x->regmap_irq_chip = &axp2101_regmap_irq_chip;
 		break;
 	case AXP803_ID:
 		axp20x->nr_cells = ARRAY_SIZE(axp803_cells);
@@ -986,6 +1085,14 @@ int axp20x_device_probe(struct axp20x_dev *axp20x)
 			regmap_write(axp20x->regmap, AXP806_REG_ADDR_EXT,
 				     AXP806_REG_ADDR_EXT_ADDR_SLAVE_MODE);
 	}
+
+	/*
+	 * TODO: Implement fuel gauge support for AXP2101.
+	 * The fuel gauge is disabled by default for now.
+	 */
+	if (axp20x->variant == AXP2101_ID)
+		regmap_update_bits(axp20x->regmap, AXP2101_MODULE_EN,
+				   AXP2101_MODULE_EN_GAUGE_EN, 0);
 
 	/* Only if there is an interrupt line connected towards the CPU. */
 	if (axp20x->irq > 0) {

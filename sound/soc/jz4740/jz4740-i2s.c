@@ -293,9 +293,13 @@ static int jz4740_i2s_hw_params(struct snd_pcm_substream *substream,
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S8:
 		sample_size = 0;
+		i2s->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+		i2s->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
 		break;
 	case SNDRV_PCM_FORMAT_S16:
 		sample_size = 1;
+		i2s->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+		i2s->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
 		break;
 	default:
 		return -EINVAL;
@@ -356,12 +360,28 @@ static int x1000_i2s_hw_params(struct snd_pcm_substream *substream,
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S8:
 		sample_size = 0;
+		i2s->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+		i2s->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
 		break;
 	case SNDRV_PCM_FORMAT_S16:
 		sample_size = 1;
+		i2s->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+		i2s->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
 		break;
 	case SNDRV_PCM_FORMAT_S24:
 		sample_size = 4;
+		/* The FIFO DMA width must match the sample container size.
+		 * With the probe default of 2 bytes, 24-bit/32-bit (DoP DSD)
+		 * samples get their 0x05/0xFA markers corrupted. */
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			i2s->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
+		else
+			i2s->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
+		break;
+	case SNDRV_PCM_FORMAT_S32_LE:
+		sample_size = 5;
+		i2s->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
+		i2s->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		break;
 	default:
 		return -EINVAL;

@@ -92,6 +92,7 @@ properties:
           - x-powers,axp806
           - x-powers,axp809
           - x-powers,axp813
+          - x-powers,axp2101
       - items:
           - const: x-powers,axp228
           - const: x-powers,axp221

@@ -1,0 +1,581 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * HiBy R2 II board (Ingenic X1000E, 64 MiB RAM, 128 MiB SPI-NAND).
+ * All values are from live stock-firmware measurements, see
+ * docs/LIVE_HARDWARE_MAP.md. This is a POC: panel init sequence is a minimal
+ * placeholder and must be replaced from HiBy's board file/datasheet.
+ */
+/dts-v1/;
+
+#include "x1000.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/clock/ingenic,tcu.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	compatible = "hiby,r2ii", "ingenic,x1000e";
+	model = "HiBy R2 II";
+
+	aliases {
+		serial2 = &uart2;
+	};
+
+	chosen {
+		stdout-path = "serial2:115200n8";
+		/* U-Boot passes mem=32M@0x0; CONFIG_CMDLINE_OVERRIDE is set in
+		 * r2ii_defconfig so this wins. */
+		bootargs = "console=ttyS2,115200n8 mem=64M@0x0 no_console_suspend lpj=5009408 ip=off init=/linuxrc ubi.mtd=4 root=ubi0:rootfs ubi.mtd=5 rootfstype=ubifs rw";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* U-Boot initialises the SLCD panel and leaves this buffer intact. */
+		framebuffer@2200000 {
+			compatible = "simple-framebuffer";
+			reg = <0x2200000 0x152000>; /* 1384448 bytes = 480*360*4*2 + 48 */
+			width = <480>;
+			height = <360>;
+			stride = <1920>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* Keep the scanout buffer away from the buddy allocator, but
+		 * leave it mapped so the CPU can draw into it. */
+		fb_reserved: framebuffer@2200000 {
+			reg = <0x2200000 0x152000>;
+		};
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x04000000>;
+	};
+
+	/* GPIO_AMP_PWR (GPIO 35 = PB3) feeds every ES9219C supply, vcc_dmic and
+	 * sa04-pullup33 on the stock board (debugfs regulator/supply_map). */
+	amp_pwr: regulator-amp {
+		compatible = "regulator-fixed";
+		regulator-name = "GPIO_AMP_PWR";
+		gpio = <&gpb 3 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	bl_pwr: regulator-backlight {
+		compatible = "regulator-fixed";
+		regulator-name = "BL PWR";
+		gpio = <&gpc 25 GPIO_ACTIVE_HIGH>;	/* GPIO 89 */
+		enable-active-high;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	sd_pwrseq: sd-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gpb 6 GPIO_ACTIVE_HIGH>;	/* GPIO 38 mmc_power */
+		post-power-on-delay-ms = <200>;
+	};
+
+	wlan_pwrseq: wlan-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gpc 17 GPIO_ACTIVE_LOW>;	/* GPIO 81 wifi_reset */
+		post-power-on-delay-ms = <200>;
+	};
+
+	codec_mclk: codec-mclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		clock-accuracy = <100>;
+	};
+
+
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "r2";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,bitclock-master = <&dai_codec>;
+		simple-audio-card,frame-master = <&dai_codec>;
+
+		dai_cpu: simple-audio-card,cpu {
+			sound-dai = <&aic>;
+			system-clock-frequency = <24000000>;
+			system-clock-direction-out;
+		};
+
+		dai_codec: simple-audio-card,codec {
+			sound-dai = <&es9219c>;
+			system-clock-frequency = <24000000>;
+		};
+	};
+
+	/* Backlight: PWM0, BL PWR on GPIO 89 */
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm 1 5000000 0>;
+		power-supply = <&bl_pwr>;
+		brightness-levels = <0 64 128 192 255>;
+		num-interpolated-steps = <64>;
+		default-brightness-level = <192>;
+	};
+
+	/* Keys: ring1/ring2 are plain GPIOs (EV_KEY), not a rotary encoder. */
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		power {
+			label = "power";
+			linux,code = <KEY_POWER>;
+			gpios = <&gpb 31 GPIO_ACTIVE_LOW>;	/* GPIO 63 */
+			wakeup-source;
+		};
+		play {
+			label = "play-pause";
+			linux,code = <KEY_PLAYPAUSE>;
+			gpios = <&gpb 13 GPIO_ACTIVE_LOW>;	/* GPIO 45 */
+		};
+		next {
+			label = "next-song";
+			linux,code = <KEY_NEXTSONG>;
+			gpios = <&gpb 15 GPIO_ACTIVE_LOW>;	/* GPIO 47 */
+		};
+		prev {
+			label = "previous-song";
+			linux,code = <KEY_PREVIOUSSONG>;
+			gpios = <&gpb 28 GPIO_ACTIVE_LOW>;	/* GPIO 60 */
+		};
+		ring1 {
+			label = "ring1";
+			linux,code = <KEY_NEXTSONG>;
+			gpios = <&gpb 11 GPIO_ACTIVE_LOW>;	/* GPIO 43 */
+		};
+		ring2 {
+			label = "ring2";
+			linux,code = <KEY_PREVIOUSSONG>;
+			gpios = <&gpb 12 GPIO_ACTIVE_LOW>;	/* GPIO 44 */
+		};
+	};
+
+	/* HiBy-specific devices: driver modules to be ported from the open
+	 * sources in docs/DRIVER_SOURCE_SPIKE.md. Kept as nodes so the POC DTS
+	 * documents the complete hardware. */
+	leds {
+		compatible = "gpio-leds";
+		wled {
+			label = "sgm31324-wled";
+			gpios = <&gpa 19 GPIO_ACTIVE_HIGH>;	/* GPIO 19 */
+		};
+	};
+};
+
+&exclk {
+	clock-frequency = <24000000>;
+};
+
+&tcu {
+	assigned-clocks = <&tcu TCU_CLK_TIMER0>, <&tcu TCU_CLK_TIMER2>;
+	assigned-clock-rates = <1500000>, <1500000>;
+	ingenic,pwm-channels-mask = <0xfa>;
+};
+
+&uart0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_uart0>;
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		max-speed = <1000000>;
+		reset-gpios = <&gpc 18 GPIO_ACTIVE_LOW>;		/* GPIO 82 bt_reg_on */
+		device-wakeup-gpios = <&gpc 19 GPIO_ACTIVE_HIGH>;	/* GPIO 83 host_wake_bt */
+		host-wakeup-gpios = <&gpc 20 GPIO_ACTIVE_HIGH>;	/* GPIO 84 bt_wake_host */
+	};
+};
+
+&uart2 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_uart2>;
+};
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_i2c0>;
+
+	touch@5d {
+		compatible = "goodix,gt911";
+		reg = <0x5d>;
+		interrupt-parent = <&gpc>;
+		interrupts = <21 IRQ_TYPE_EDGE_FALLING>;	/* GPIO 85 */
+		reset-gpios = <&gpd 3 GPIO_ACTIVE_LOW>;		/* GPIO 99 */
+		AVDD28-supply = <&amp_pwr>;
+		VDDIO-supply = <&amp_pwr>;
+		touchscreen-size-x = <480>;
+		touchscreen-size-y = <360>;
+	};
+};
+
+&i2c1 {
+	status = "okay";
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_i2c1>;
+
+	/* ES9219C DAC/HPA, I2C1 @ 0x48. Native in-tree ASoC codec driver. */
+	es9219c: dac@48 {
+		compatible = "ess,es9219c";
+		reg = <0x48>;
+		#sound-dai-cells = <0>;
+		avdd-supply = <&amp_pwr>;
+		vcca-supply = <&amp_pwr>;
+		avcc3v3-supply = <&amp_pwr>;
+		avcc1v8-supply = <&amp_pwr>;
+		clocks = <&codec_mclk>;
+		clock-names = "mclk";
+		reset-gpios = <&gpb 10 GPIO_ACTIVE_LOW>;	/* GPIO 42 */
+		ess,max-clock-div = <1>;
+		ess,oscillator-pad-bias = <0>;
+	};
+};
+
+&i2c2 {
+	status = "okay";
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_i2c2>;
+
+	axp2101@34 {
+		compatible = "x-powers,axp2101";
+		reg = <0x34>;
+		interrupt-parent = <&gpc>;
+		interrupts = <23 IRQ_TYPE_LEVEL_LOW>;	/* GPIO 87 axp_irq */
+		interrupt-controller;
+		#interrupt-cells = <1>;
+
+		/* AXP2101 rails now handled by the in-tree axp20x regulator
+		 * driver; values from live stock firmware (LIVE_HARDWARE_MAP.md). */
+		regulators {
+			dcdc1: dcdc1 {
+				regulator-name = "dcdc1";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+			dcdc2: dcdc2 {
+				regulator-name = "dcdc2";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+			dcdc3: dcdc3 {
+				regulator-name = "dcdc3";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+			};
+			dcdc4: dcdc4 {
+				regulator-name = "dcdc4";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+			dcdc5: dcdc5 {
+				regulator-name = "dcdc5";
+				regulator-min-microvolt = <1400000>;
+				regulator-max-microvolt = <1400000>;
+			};
+			aldo1: aldo1 {
+				regulator-name = "aldo1";
+				regulator-min-microvolt = <2500000>;
+				regulator-max-microvolt = <2500000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+			aldo2: aldo2 {
+				regulator-name = "aldo2";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+			aldo3: aldo3 {
+				regulator-name = "aldo3";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+			aldo4: aldo4 {
+				regulator-name = "aldo4";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+			};
+			bldo1: bldo1 {
+				regulator-name = "bldo1";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+			};
+			bldo2: bldo2 {
+				regulator-name = "bldo2";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
+			dldo1: dldo1 {
+				regulator-name = "dldo1";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+			};
+			dldo2: dldo2 {
+				regulator-name = "dldo2";
+				regulator-min-microvolt = <1250000>;
+				regulator-max-microvolt = <1250000>;
+			};
+			cpusldo: cpusldo {
+				regulator-name = "cpusldo";
+				regulator-min-microvolt = <500000>;
+				regulator-max-microvolt = <500000>;
+			};
+		};
+		axp_usb: axp_usb {
+			compatible = "x-powers,axp2101-usb-power-supply";
+		};
+		axp_battery: axp_battery {
+			compatible = "x-powers,axp2101-battery-power-supply";
+		};
+	};
+
+	cw2015@62 {
+		compatible = "cellwise,cw2015";
+		reg = <0x62>;
+		power-supplies = <&axp_usb>;
+		/* 64-byte profile extracted from the stock cwfg_gauge driver. */
+		cellwise,battery-profile = /bits/ 8 <
+			0x17 0x67 0x67 0x65 0x65 0x63 0x62 0x5f
+			0x5d 0x61 0x5d 0x5d 0x54 0x49 0x42 0x3b
+			0x35 0x2f 0x2a 0x2a 0x2f 0x33 0x40 0x4b
+			0x2b 0x2b 0x0c 0xcd 0x4b 0x75 0x74 0x88
+			0x8a 0x87 0x84 0x86 0x43 0x1b 0x6b 0x31
+			0x09 0x59 0x12 0x3f 0x7f 0x97 0xa7 0x3b
+			0x58 0x6e 0x98 0xb0 0x80 0xda 0xea 0xcb
+			0x2f 0x00 0x64 0xa5 0xb5 0x08 0x40 0x51>;
+	};
+
+	sgm31324@30 {
+		compatible = "sgmic,sgm31324";
+		reg = <0x30>;
+		enable-gpios = <&gpd 4 GPIO_ACTIVE_HIGH>;	/* GPIO 100 */
+
+		multi-led {
+			color = <LED_COLOR_ID_RGB>;
+			function = LED_FUNCTION_STATUS;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			led@1 {
+				reg = <1>;
+				color = <LED_COLOR_ID_RED>;
+			};
+			led@2 {
+				reg = <2>;
+				color = <LED_COLOR_ID_GREEN>;
+			};
+			led@3 {
+				reg = <3>;
+				color = <LED_COLOR_ID_BLUE>;
+			};
+		};
+	};
+};
+
+&sfc {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_sfc>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		spi-max-frequency = <50000000>;
+		spi-rx-bus-width = <4>;
+		spi-tx-bus-width = <4>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			uboot@0 {
+				label = "uboot";
+				reg = <0x00000000 0x00080000>;
+				read-only;
+			};
+			logo@80000 {
+				label = "logo";
+				reg = <0x00080000 0x00280000>;
+			};
+			kernel@300000 {
+				label = "kernel";
+				reg = <0x00300000 0x00600000>;
+				read-only;
+			};
+			recovery@900000 {
+				label = "recovery";
+				reg = <0x00900000 0x00700000>;
+				read-only;
+			};
+			rootfs@1000000 {
+				label = "rootfs";
+				reg = <0x01000000 0x04000000>;
+			};
+			data@5000000 {
+				label = "data";
+				reg = <0x05000000 0x03000000>;
+			};
+		};
+	};
+};
+
+&msc0 {
+	/delete-property/ dmas;
+	/delete-property/ dma-names;
+	status = "okay";
+	bus-width = <4>;
+	max-frequency = <50000000>;
+	mmc-pwrseq = <&sd_pwrseq>;
+	cd-gpios = <&gpb 7 GPIO_ACTIVE_LOW>;	/* GPIO 39 mmc_detect */
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_msc0>;
+};
+
+&msc1 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	bus-width = <4>;
+	max-frequency = <50000000>;
+	mmc-pwrseq = <&wlan_pwrseq>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_msc1>;
+	non-removable;
+	cap-power-off-card;
+	keep-power-in-suspend;
+	wakeup-source;
+
+	wifi@1 {
+		compatible = "brcm,bcm4329-fmac";
+		reg = <1>;
+		interrupt-parent = <&gpc>;
+		interrupts = <16 IRQ_TYPE_EDGE_FALLING>;	/* GPIO 80 oob irq */
+		interrupt-names = "host-wake";
+		wakeup-source;
+	};
+};
+
+&aic {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_i2s>;
+};
+
+&dmic {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_dmic>;
+};
+
+&slcd {
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_slcd>;
+	reset-gpios = <&gpa 16 GPIO_ACTIVE_LOW>;	/* GPIO 16 lcd rst */
+	rd-gpios = <&gpb 16 GPIO_ACTIVE_LOW>;		/* GPIO 48 lcd rd */
+	width = <480>;
+	height = <360>;
+	buswidth = <8>;
+	bpp = <24>;
+	bus-max-speed = <15000000>;
+	/* PLACEHOLDER: replace with the real panel init sequence. */
+	init-sequence = /bits/ 16 <
+		1 0x11
+		3 120
+		1 0x3a 2 0x06
+		1 0x29
+	>;
+	write-sequence = /bits/ 16 < 1 0x2c >;
+};
+
+&otg_phy {
+	status = "okay";
+};
+
+&otg {
+	status = "okay";
+};
+
+&pinctrl {
+	pins_uart0: uart0 {
+		function = "uart0";
+		groups = "uart0-data", "uart0-hwflow";
+	};
+	pins_uart2: uart2 {
+		function = "uart2";
+		groups = "uart2-data-d";
+	};
+	pins_i2c0: i2c0 {
+		function = "i2c0";
+		groups = "i2c0-data";
+		bias-pull-up;
+	};
+	pins_i2c1: i2c1 {
+		function = "i2c1";
+		groups = "i2c1-data-c";
+		bias-pull-up;
+	};
+	pins_i2c2: i2c2 {
+		function = "i2c2";
+		groups = "i2c2-data";
+	};
+	pins_sfc: sfc {
+		function = "sfc";
+		groups = "sfc-data", "sfc-clk", "sfc-ce";
+	};
+	pins_msc0: msc0 {
+		function = "mmc0";
+		groups = "mmc0-1bit", "mmc0-4bit";
+		bias-disable;
+	};
+	pins_msc1: msc1 {
+		function = "mmc1";
+		groups = "mmc1-1bit", "mmc1-4bit";
+		bias-disable;
+	};
+	pins_i2s: i2s {
+		function = "i2s";
+		groups = "i2s-data-tx", "i2s-data-rx", "i2s-clk-txrx", "i2s-sysclk";
+	};
+	pins_dmic: dmic {
+		function = "dmic";
+		groups = "dmic-if0", "dmic-if1";
+	};
+	pins_slcd: slcd {
+		function = "lcd";
+		groups = "lcd-8bit";
+	};
+};

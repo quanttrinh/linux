@@ -129,12 +129,15 @@ static inline void *get_fdt(void)
 		if (fdt_magic(&__appended_dtb) == FDT_MAGIC)
 			return &__appended_dtb;
 
-	if (fw_arg0 == -2) /* UHI interface */
-		return (void *)fw_arg1;
-
+	/* Prefer the built-in DTB: boot loaders that are not U-Boot do not
+	 * set up the UHI registers reliably (a0 == -2, a1 = DTB pointer).
+	 */
 	if (IS_ENABLED(CONFIG_BUILTIN_DTB))
 		if (&__dtb_start != &__dtb_end)
 			return &__dtb_start;
+
+	if (fw_arg0 == -2) /* UHI interface */
+		return (void *)fw_arg1;
 
 	return NULL;
 }

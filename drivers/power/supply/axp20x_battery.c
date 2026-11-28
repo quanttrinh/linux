@@ -17,6 +17,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/bitfield.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -59,11 +60,17 @@
 struct axp20x_batt_ps;
 
 struct axp_data {
+	const struct power_supply_desc	*bat_ps_desc;
 	int	ccc_scale;
 	int	ccc_offset;
 	bool	has_fg_valid;
 	int	(*get_max_voltage)(struct axp20x_batt_ps *batt, int *val);
 	int	(*set_max_voltage)(struct axp20x_batt_ps *batt, int val);
+	int	(*cfg_iio_chan)(struct platform_device *pdev,
+				  struct axp20x_batt_ps *batt);
+	void	(*set_bat_info)(struct platform_device *pdev,
+				  struct axp20x_batt_ps *batt,
+				  struct power_supply_battery_info *info);
 };
 
 struct axp20x_batt_ps {
@@ -542,6 +549,128 @@ static const struct axp_data axp813_data = {
 	.set_max_voltage = axp20x_battery_set_max_voltage,
 };
 
+/* AXP2101: read-only charger/battery status; capacity not implemented. */
+#define AXP2101_PWR_OP_BATT_PRESENT	BIT(3)
+#define AXP2101_PWR_STATUS_MASK		GENMASK(6, 5)
+#define AXP2101_CHRG_STATE_MASK		GENMASK(2, 0)
+#define AXP2101_PWR_STATUS_BAT_STANDBY	0
+#define AXP2101_PWR_STATUS_BAT_CHRG	1
+#define AXP2101_PWR_STATUS_BAT_DISCHRG	2
+#define AXP2101_CHRG_STATE_PRECHARGE	1
+#define AXP2101_CHRG_STATE_CC		2
+#define AXP2101_CHRG_STATE_CV		3
+#define AXP2101_CHRG_STATE_DONE		4
+#define AXP2101_CHRG_CV_VOLT_MASK	GENMASK(2, 0)
+#define AXP2101_ICC_MASK		GENMASK(4, 0)
+
+static const int axp2101_cv_uv[] = {
+	0, 4000000, 4100000, 4200000, 4350000, 4400000, 0, 0,
+};
+
+static int axp2101_ccc_from_sel(unsigned int sel)
+{
+	/* Selectors 17-31 are reserved (AXP2101_ICC_MAX_SEL = 16). */
+	if (sel > 16)
+		return -EINVAL;
+	return sel <= 8 ? sel * 25000 : 200000 + (sel - 8) * 100000;
+}
+
+static int axp2101_battery_get_property(struct power_supply *psy,
+					 enum power_supply_property psp,
+					 union power_supply_propval *val)
+{
+	struct axp20x_batt_ps *batt = power_supply_get_drvdata(psy);
+	unsigned int reg;
+	int ret;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_PRESENT:
+	case POWER_SUPPLY_PROP_ONLINE:
+		ret = regmap_read(batt->regmap, AXP2101_PMU_STATUS_1, &reg);
+		if (ret)
+			return ret;
+		val->intval = !!(reg & AXP2101_PWR_OP_BATT_PRESENT);
+		return 0;
+	case POWER_SUPPLY_PROP_STATUS:
+		ret = regmap_read(batt->regmap, AXP2101_PMU_STATUS_2, &reg);
+		if (ret)
+			return ret;
+		switch (FIELD_GET(AXP2101_CHRG_STATE_MASK, reg)) {
+		case AXP2101_CHRG_STATE_PRECHARGE:
+		case AXP2101_CHRG_STATE_CC:
+		case AXP2101_CHRG_STATE_CV:
+			val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			return 0;
+		case AXP2101_CHRG_STATE_DONE:
+			val->intval = POWER_SUPPLY_STATUS_FULL;
+			return 0;
+		}
+		switch (FIELD_GET(AXP2101_PWR_STATUS_MASK, reg)) {
+		case AXP2101_PWR_STATUS_BAT_STANDBY:
+			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+			return 0;
+		case AXP2101_PWR_STATUS_BAT_CHRG:
+			val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			return 0;
+		case AXP2101_PWR_STATUS_BAT_DISCHRG:
+			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+			return 0;
+		default:
+			val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+			return 0;
+		}
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		ret = regmap_read(batt->regmap, AXP2101_ICC_CHG_SET, &reg);
+		if (ret)
+			return ret;
+		val->intval = axp2101_ccc_from_sel(FIELD_GET(AXP2101_ICC_MASK, reg));
+		return 0;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		ret = regmap_read(batt->regmap, AXP2101_CV_CHG_SET, &reg);
+		if (ret)
+			return ret;
+		val->intval = axp2101_cv_uv[FIELD_GET(AXP2101_CHRG_CV_VOLT_MASK, reg)];
+		return val->intval ? 0 : -EINVAL;
+	default:
+		return -EINVAL;
+	}
+}
+
+static int axp2101_cfg_iio_chan(struct platform_device *pdev,
+				struct axp20x_batt_ps *batt)
+{
+	return 0;
+}
+
+static void axp2101_set_bat_info(struct platform_device *pdev,
+				 struct axp20x_batt_ps *batt,
+				 struct power_supply_battery_info *info)
+{
+	/* Registers already hold the stock charger values; leave them alone. */
+}
+
+static enum power_supply_property axp2101_battery_props[] = {
+	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_STATUS,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+};
+
+static const struct power_supply_desc axp2101_batt_desc = {
+	.name = "axp20x-battery",
+	.type = POWER_SUPPLY_TYPE_BATTERY,
+	.properties = axp2101_battery_props,
+	.num_properties = ARRAY_SIZE(axp2101_battery_props),
+	.get_property = axp2101_battery_get_property,
+};
+
+static const struct axp_data axp2101_batt_data = {
+	.bat_ps_desc = &axp2101_batt_desc,
+	.cfg_iio_chan = axp2101_cfg_iio_chan,
+	.set_bat_info = axp2101_set_bat_info,
+};
+
 static const struct of_device_id axp20x_battery_ps_id[] = {
 	{
 		.compatible = "x-powers,axp209-battery-power-supply",
@@ -549,6 +678,9 @@ static const struct of_device_id axp20x_battery_ps_id[] = {
 	}, {
 		.compatible = "x-powers,axp221-battery-power-supply",
 		.data = (void *)&axp221_data,
+	}, {
+		.compatible = "x-powers,axp2101-battery-power-supply",
+		.data = (void *)&axp2101_batt_data,
 	}, {
 		.compatible = "x-powers,axp813-battery-power-supply",
 		.data = (void *)&axp813_data,
@@ -561,7 +693,6 @@ static int axp20x_power_probe(struct platform_device *pdev)
 	struct axp20x_batt_ps *axp20x_batt;
 	struct power_supply_config psy_cfg = {};
 	struct power_supply_battery_info *info;
-	struct device *dev = &pdev->dev;
 
 	if (!of_device_is_available(pdev->dev.of_node))
 		return -ENODEV;
@@ -573,27 +704,35 @@ static int axp20x_power_probe(struct platform_device *pdev)
 
 	axp20x_batt->dev = &pdev->dev;
 
-	axp20x_batt->batt_v = devm_iio_channel_get(&pdev->dev, "batt_v");
-	if (IS_ERR(axp20x_batt->batt_v)) {
-		if (PTR_ERR(axp20x_batt->batt_v) == -ENODEV)
-			return -EPROBE_DEFER;
-		return PTR_ERR(axp20x_batt->batt_v);
-	}
+	axp20x_batt->data = of_device_get_match_data(&pdev->dev);
+	if (axp20x_batt->data->cfg_iio_chan) {
+		int ret = axp20x_batt->data->cfg_iio_chan(pdev, axp20x_batt);
 
-	axp20x_batt->batt_chrg_i = devm_iio_channel_get(&pdev->dev,
-							"batt_chrg_i");
-	if (IS_ERR(axp20x_batt->batt_chrg_i)) {
-		if (PTR_ERR(axp20x_batt->batt_chrg_i) == -ENODEV)
-			return -EPROBE_DEFER;
-		return PTR_ERR(axp20x_batt->batt_chrg_i);
-	}
+		if (ret)
+			return ret;
+	} else {
+		axp20x_batt->batt_v = devm_iio_channel_get(&pdev->dev, "batt_v");
+		if (IS_ERR(axp20x_batt->batt_v)) {
+			if (PTR_ERR(axp20x_batt->batt_v) == -ENODEV)
+				return -EPROBE_DEFER;
+			return PTR_ERR(axp20x_batt->batt_v);
+		}
 
-	axp20x_batt->batt_dischrg_i = devm_iio_channel_get(&pdev->dev,
-							   "batt_dischrg_i");
-	if (IS_ERR(axp20x_batt->batt_dischrg_i)) {
-		if (PTR_ERR(axp20x_batt->batt_dischrg_i) == -ENODEV)
-			return -EPROBE_DEFER;
-		return PTR_ERR(axp20x_batt->batt_dischrg_i);
+		axp20x_batt->batt_chrg_i = devm_iio_channel_get(&pdev->dev,
+								"batt_chrg_i");
+		if (IS_ERR(axp20x_batt->batt_chrg_i)) {
+			if (PTR_ERR(axp20x_batt->batt_chrg_i) == -ENODEV)
+				return -EPROBE_DEFER;
+			return PTR_ERR(axp20x_batt->batt_chrg_i);
+		}
+
+		axp20x_batt->batt_dischrg_i = devm_iio_channel_get(&pdev->dev,
+								   "batt_dischrg_i");
+		if (IS_ERR(axp20x_batt->batt_dischrg_i)) {
+			if (PTR_ERR(axp20x_batt->batt_dischrg_i) == -ENODEV)
+				return -EPROBE_DEFER;
+			return PTR_ERR(axp20x_batt->batt_dischrg_i);
+		}
 	}
 
 	axp20x_batt->regmap = dev_get_regmap(pdev->dev.parent, NULL);
@@ -602,9 +741,8 @@ static int axp20x_power_probe(struct platform_device *pdev)
 	psy_cfg.drv_data = axp20x_batt;
 	psy_cfg.of_node = pdev->dev.of_node;
 
-	axp20x_batt->data = (struct axp_data *)of_device_get_match_data(dev);
-
 	axp20x_batt->batt = devm_power_supply_register(&pdev->dev,
+						       axp20x_batt->data->bat_ps_desc ?:
 						       &axp20x_batt_ps_desc,
 						       &psy_cfg);
 	if (IS_ERR(axp20x_batt->batt)) {
@@ -617,21 +755,27 @@ static int axp20x_power_probe(struct platform_device *pdev)
 		int vmin = info->voltage_min_design_uv;
 		int ccc = info->constant_charge_current_max_ua;
 
-		if (vmin > 0 && axp20x_set_voltage_min_design(axp20x_batt,
-							      vmin))
-			dev_err(&pdev->dev,
-				"couldn't set voltage_min_design\n");
+		if (axp20x_batt->data->set_bat_info) {
+			axp20x_batt->data->set_bat_info(pdev, axp20x_batt, info);
+		} else {
+			if (vmin > 0 && axp20x_set_voltage_min_design(axp20x_batt,
+								      vmin))
+				dev_err(&pdev->dev,
+					"couldn't set voltage_min_design\n");
 
-		/* Set max to unverified value to be able to set CCC */
-		axp20x_batt->max_ccc = ccc;
-
-		if (ccc <= 0 || axp20x_set_constant_charge_current(axp20x_batt,
-								   ccc)) {
-			dev_err(&pdev->dev,
-				"couldn't set constant charge current from DT: fallback to minimum value\n");
-			ccc = 300000;
+			/* Set max to unverified value to be able to set CCC */
 			axp20x_batt->max_ccc = ccc;
-			axp20x_set_constant_charge_current(axp20x_batt, ccc);
+
+			if (ccc <= 0 ||
+			    axp20x_set_constant_charge_current(axp20x_batt,
+							       ccc)) {
+				dev_err(&pdev->dev,
+					"couldn't set constant charge current from DT: fallback to minimum value\n");
+				ccc = 300000;
+				axp20x_batt->max_ccc = ccc;
+				axp20x_set_constant_charge_current(axp20x_batt,
+								   ccc);
+			}
 		}
 	}
 
@@ -639,9 +783,9 @@ static int axp20x_power_probe(struct platform_device *pdev)
 	 * Update max CCC to a valid value if battery info is present or set it
 	 * to current register value by default.
 	 */
-	axp20x_get_constant_charge_current(axp20x_batt,
-					   &axp20x_batt->max_ccc);
-
+	if (!axp20x_batt->data->set_bat_info)
+		axp20x_get_constant_charge_current(axp20x_batt,
+						   &axp20x_batt->max_ccc);
 	return 0;
 }
 

@@ -346,7 +346,6 @@ config CHARGER_AXP20X
 config BATTERY_AXP20X
 	tristate "X-Powers AXP20X battery driver"
 	depends on MFD_AXP20X
-	depends on AXP20X_ADC
 	depends on IIO
 	help
 	  Say Y here to enable support for X-Powers AXP20X PMICs' battery power

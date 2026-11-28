@@ -12,7 +12,7 @@ include $(srctree)/lib/vdso/Makefile
 obj-vdso-y := elf.o vgettimeofday.o sigreturn.o
 
 # Common compiler flags between ABIs.
-ccflags-vdso := \
+ccflags-vdso := -std=gnu11 \
 	$(filter -I%,$(KBUILD_CFLAGS)) \
 	$(filter -E%,$(KBUILD_CFLAGS)) \
 	$(filter -mmicromips,$(KBUILD_CFLAGS)) \

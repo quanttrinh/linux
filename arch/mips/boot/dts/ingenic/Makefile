@@ -4,6 +4,7 @@ dtb-$(CONFIG_JZ4740_RS90)		+= rs90.dtb
 dtb-$(CONFIG_JZ4770_GCW0)		+= gcw0.dtb
 dtb-$(CONFIG_JZ4780_CI20)		+= ci20.dtb
 dtb-$(CONFIG_X1000_CU1000_NEO)		+= cu1000-neo.dtb
+dtb-$(CONFIG_X1000_HIBY_R2II)		+= ingenic-r2.dtb
 dtb-$(CONFIG_X1830_CU1830_NEO)		+= cu1830-neo.dtb
 dtb-$(CONFIG_X1000_NANO_EVB)		+= x1000-nano-evb.dtb
 dtb-$(CONFIG_X1000_NANO_EVB_NAND)	+= x1000-nano-evb-nand.dtb
