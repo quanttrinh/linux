@@ -269,6 +269,8 @@
 	axp2101@34 {
 		compatible = "x-powers,axp2101";
 		reg = <0x34>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pins_axp_irq>;
 		interrupt-parent = <&gpc>;
 		interrupts = <23 IRQ_TYPE_LEVEL_LOW>;	/* GPIO 87 axp_irq */
 		interrupt-controller;
@@ -542,6 +544,11 @@
 };
 
 &pinctrl {
+	/* AXP2101 INT is open-drain active-low; stock leaves PC23 high at idle. */
+	pins_axp_irq: axp-irq {
+		pins = "PC23";
+		bias-pull-up;
+	};
 	pins_pwm0: pwm0 {
 		function = "pwm0";
 		groups = "pwm0";
