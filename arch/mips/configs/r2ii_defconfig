@@ -100,6 +100,7 @@ CONFIG_RTC_CLASS=y
 CONFIG_RTC_DRV_JZ4740=y
 CONFIG_DMADEVICES=y
 CONFIG_DMA_JZ4780=y
+CONFIG_DMA_INGENIC=y
 # CONFIG_INGENIC_TIMER is not set
 CONFIG_INGENIC_SYSOST=y
 # CONFIG_IOMMU_SUPPORT is not set
@@ -147,7 +148,7 @@ CONFIG_CMDLINE_BOOL=y
 # HiBy R2 II board additions
 CONFIG_BUILTIN_DTB=y
 CONFIG_CMDLINE_OVERRIDE=y
-CONFIG_CMDLINE="console=ttyGS0,115200n8 ignore_loglevel irqpoll mem=64M@0x0 no_console_suspend lpj=5009408 ip=off init=/linuxrc ubi.mtd=4 root=ubi0:rootfs ubi.mtd=5 rootfstype=ubifs rw"
+CONFIG_CMDLINE="console=ttyGS0,115200n8 ignore_loglevel mem=64M@0x0 no_console_suspend lpj=5009408 ip=off init=/linuxrc ubi.mtd=4 root=ubi0:rootfs ubi.mtd=5 rootfstype=ubifs rw"
 # Boot flash: SFC + SPI-NAND
 CONFIG_MTD_SPI_NAND=y
 CONFIG_MTD_UBI=y
@@ -187,7 +188,8 @@ CONFIG_BT_BCM=y
 CONFIG_BT_RFCOMM=m
 CONFIG_BT_L2CAP=m
 CONFIG_SND_SOC_ES9219C=y
-CONFIG_LEDS_SGM31324=y
+# CONFIG_LEDS_SGM31324 is not set
+# NOTE: probe wedges boot (initcall_debug: sgm31324_driver_init never returns)
 CONFIG_MFD_CORE=y
 CONFIG_MFD_AXP20X=y
 CONFIG_MFD_AXP20X_I2C=y

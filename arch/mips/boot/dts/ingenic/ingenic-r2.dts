@@ -10,6 +10,7 @@
 #include "x1000.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/dma/x1000-dma.h>
 #include <dt-bindings/clock/ingenic,tcu.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/leds/common.h>
@@ -81,10 +82,14 @@
 		regulator-always-on;
 	};
 
-	sd_pwrseq: sd-pwrseq {
-		compatible = "mmc-pwrseq-simple";
-		reset-gpios = <&gpb 6 GPIO_ACTIVE_HIGH>;	/* GPIO 38 mmc_power */
-		post-power-on-delay-ms = <200>;
+	/* GPIO 38 (PB6) powers the SD card; stock jzmmc drives it high. */
+	sd_pwr: regulator-sd {
+		compatible = "regulator-fixed";
+		regulator-name = "SD PWR";
+		gpio = <&gpb 6 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
 	};
 
 	wlan_pwrseq: wlan-pwrseq {
@@ -123,7 +128,9 @@
 	/* Backlight: PWM0, BL PWR on GPIO 89 */
 	backlight: backlight {
 		compatible = "pwm-backlight";
-		pwms = <&pwm 1 5000000 0>;
+		pwms = <&pwm 0 5000000 0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pins_pwm0>;
 		power-supply = <&bl_pwr>;
 		brightness-levels = <0 64 128 192 255>;
 		num-interpolated-steps = <64>;
@@ -184,9 +191,10 @@
 };
 
 &tcu {
-	assigned-clocks = <&tcu TCU_CLK_TIMER0>, <&tcu TCU_CLK_TIMER2>;
+	/* Channel 0 is the physical backlight PWM; reserve 1/2 for timers. */
+	assigned-clocks = <&tcu TCU_CLK_TIMER1>, <&tcu TCU_CLK_TIMER2>;
 	assigned-clock-rates = <1500000>, <1500000>;
-	ingenic,pwm-channels-mask = <0xfa>;
+	ingenic,pwm-channels-mask = <0xf9>;
 };
 
 &uart0 {
@@ -220,6 +228,7 @@
 		reg = <0x5d>;
 		interrupt-parent = <&gpc>;
 		interrupts = <21 IRQ_TYPE_EDGE_FALLING>;	/* GPIO 85 */
+		irq-gpios = <&gpc 21 GPIO_ACTIVE_HIGH>;		/* GPIO 85 GTP_INT_IRQ */
 		reset-gpios = <&gpd 3 GPIO_ACTIVE_LOW>;		/* GPIO 99 */
 		AVDD28-supply = <&amp_pwr>;
 		VDDIO-supply = <&amp_pwr>;
@@ -453,12 +462,12 @@
 };
 
 &msc0 {
-	/delete-property/ dmas;
-	/delete-property/ dma-names;
 	status = "okay";
+	dmas = <&pdma X1000_DMA_MSC0_RX>, <&pdma X1000_DMA_MSC0_TX>;
+	dma-names = "rx", "tx";
 	bus-width = <4>;
 	max-frequency = <50000000>;
-	mmc-pwrseq = <&sd_pwrseq>;
+	vmmc-supply = <&sd_pwr>;
 	cd-gpios = <&gpb 7 GPIO_ACTIVE_LOW>;	/* GPIO 39 mmc_detect */
 	pinctrl-names = "default";
 	pinctrl-0 = <&pins_msc0>;
@@ -466,6 +475,8 @@
 
 &msc1 {
 	status = "okay";
+	dmas = <&pdma X1000_DMA_MSC1_RX>, <&pdma X1000_DMA_MSC1_TX>;
+	dma-names = "rx", "tx";
 	#address-cells = <1>;
 	#size-cells = <0>;
 	bus-width = <4>;
@@ -527,9 +538,14 @@
 
 &otg {
 	status = "okay";
+	dr_mode = "peripheral";
 };
 
 &pinctrl {
+	pins_pwm0: pwm0 {
+		function = "pwm0";
+		groups = "pwm0";
+	};
 	pins_uart0: uart0 {
 		function = "uart0";
 		groups = "uart0-data", "uart0-hwflow";
