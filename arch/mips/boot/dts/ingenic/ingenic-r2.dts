@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * HiBy R2 II board (Ingenic X1000E, 64 MiB RAM, 128 MiB SPI-NAND).
- * All values are from live stock-firmware measurements, see
- * docs/LIVE_HARDWARE_MAP.md. This is a POC: panel init sequence is a minimal
- * placeholder and must be replaced from HiBy's board file/datasheet.
+ * All values come from live stock-firmware measurements; see
+ * docs/LIVE_HARDWARE_MAP.md.
+ *
+ * U-Boot initialises the SLCD panel and leaves a framebuffer in DRAM, so
+ * Linux uses simplefb.  The DRM/SLCD node stays disabled until a real panel
+ * init sequence is available.
  */
 /dts-v1/;
 
@@ -69,21 +72,8 @@
 		enable-active-high;
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
-		regulator-always-on;
-	};
-
-	/* Virtual touch supply.  The GT911 is powered from the AXP2101, but
-	 * the PMIC only probes after the i2c0 bus (and therefore Goodix) has
-	 * registered.  This pass-through regulator uses an AXP rail as its
-	 * parent purely to make Goodix defer until the PMIC rails are up;
-	 * without it the controller is unpowered and the ID read times out. */
-	tp_pwr: regulator-touch {
-		compatible = "regulator-fixed";
-		regulator-name = "TP PWR";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-		vin-supply = <&aldo3>;
-		regulator-always-on;
+		/* Stock leaves this off at idle; the ES9219C driver enables it
+		 * only while the codec is powered. */
 	};
 
 	bl_pwr: regulator-backlight {
@@ -104,6 +94,15 @@
 		enable-active-high;
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
+	};
+
+	/* Battery design data for the CW2015 gauge (values from the stock
+	 * AXP2101/CW2015 power-supply dumps). */
+	battery: battery {
+		compatible = "simple-battery";
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4350000>;
+		energy-full-design-microwatt-hours = <1600000>;
 	};
 
 	wlan_pwrseq: wlan-pwrseq {
@@ -154,6 +153,8 @@
 	/* Keys: ring1/ring2 are plain GPIOs (EV_KEY), not a rotary encoder. */
 	gpio-keys {
 		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pins_keys>;
 
 		power {
 			label = "power";
@@ -195,6 +196,9 @@
 		compatible = "gpio-leds";
 		wled {
 			label = "sgm31324-wled";
+			function = LED_FUNCTION_STATUS;
+			color = <LED_COLOR_ID_WHITE>;
+			default-state = "off";
 			gpios = <&gpa 19 GPIO_ACTIVE_HIGH>;	/* GPIO 19 */
 		};
 	};
@@ -215,7 +219,6 @@
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&pins_uart0>;
-
 };
 
 &uart2 {
@@ -233,13 +236,19 @@
 	touch@5d {
 		compatible = "goodix,gt911";
 		reg = <0x5d>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pins_touch>;
 		interrupt-parent = <&gpc>;
 		interrupts = <21 IRQ_TYPE_EDGE_FALLING>;	/* GPIO 85 */
 		irq-gpios = <&gpc 21 GPIO_ACTIVE_HIGH>;		/* GPIO 85 GTP_INT_IRQ */
 		/* driver drives raw 0->1: low asserts reset, high releases it */
 		reset-gpios = <&gpd 3 GPIO_ACTIVE_HIGH>;		/* GPIO 99 */
-		AVDD28-supply = <&tp_pwr>;
-		VDDIO-supply = <&tp_pwr>;
+		/* The touch controller is powered from the always-on AXP 3.3 V
+		 * rail.  These phandles also make Goodix defer until the PMIC
+		 * (i2c2) has probed: i2c0 registers first, so without the
+		 * dependency the controller is still unpowered when probe runs. */
+		AVDD28-supply = <&aldo3>;
+		VDDIO-supply = <&aldo3>;
 		touchscreen-size-x = <480>;
 		touchscreen-size-y = <360>;
 	};
@@ -348,11 +357,15 @@
 				regulator-name = "bldo1";
 				regulator-min-microvolt = <3000000>;
 				regulator-max-microvolt = <3000000>;
+				regulator-always-on;
+				regulator-boot-on;
 			};
 			bldo2: bldo2 {
 				regulator-name = "bldo2";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
+				regulator-boot-on;
 			};
 			dldo1: dldo1 {
 				regulator-name = "dldo1";
@@ -382,6 +395,7 @@
 		compatible = "cellwise,cw2015";
 		reg = <0x62>;
 		power-supplies = <&axp_usb>;
+		monitored-battery = <&battery>;
 		/* 64-byte profile extracted from the stock cwfg_gauge driver. */
 		cellwise,battery-profile = /bits/ 8 <
 			0x17 0x67 0x67 0x65 0x65 0x63 0x62 0x5f
@@ -477,6 +491,7 @@
 	dma-names = "rx", "tx";
 	bus-width = <4>;
 	max-frequency = <50000000>;
+	no-1-8-v;
 	vmmc-supply = <&sd_pwr>;
 	cd-gpios = <&gpb 7 GPIO_ACTIVE_LOW>;	/* GPIO 39 mmc_detect */
 	pinctrl-names = "default";
@@ -491,6 +506,7 @@
 	#size-cells = <0>;
 	bus-width = <4>;
 	max-frequency = <50000000>;
+	no-1-8-v;
 	mmc-pwrseq = <&wlan_pwrseq>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pins_msc1>;
@@ -544,6 +560,7 @@
 
 &otg_phy {
 	status = "okay";
+	vcc-supply = <&aldo3>;
 };
 
 &otg {
@@ -551,29 +568,72 @@
 	dr_mode = "peripheral";
 };
 
+/* GPIO line names mirror the stock kernel's gpio_request() labels and the
+ * hardware map.  Blank entries are unused or not routed on this board.
+ */
+&gpa {
+	gpio-line-names =
+		"", "", "", "", "", "", "", "",
+		"", "", "", "", "", "", "", "",
+		"lcd-rst", "usb-insert-detect", "earpods-wire", "sgm31324-wled";
+};
+
+&gpb {
+	gpio-line-names =
+		"", "", "",
+		"amp-pwr", "", "",
+		"mmc-power", "mmc-detect", "", "",
+		"es9219-reset", "ring1", "ring2", "play-key",
+		"usb-chsel", "next-song-key", "lcd-rd", "", "",
+		"lcd-vsync", "", "", "", "", "",
+		"drvvbus", "rtc32k", "",
+		"prev-song-key", "",
+		"tcs1421-cfg1", "power-key";
+};
+
 /* BCM4343A1: BT_REG_ON and host->chip BT_WAKE are kept high, as stock does.
  * Firmware is loaded from userspace over /dev/ttyS0 by brcm_patchram_plus.
  */
 &gpc {
+	gpio-line-names =
+		"", "", "", "", "", "", "", "",
+		"earpods-key-power", "", "", "", "", "", "", "",
+		"wifi-oob-irq", "wifi-reset", "bt-reg-on", "host-wake-bt",
+		"bt-wake-host", "gt911-int", "headphone-detect", "axp-irq",
+		"", "bl-pwr";
+
 	bt-reg-on-hog {
 		gpio-hog;
 		gpios = <18 GPIO_ACTIVE_HIGH>;		/* GPIO 82 bt_reg_on */
 		output-high;
-		line-name = "bt_reg_on";
+		line-name = "bt-reg-on";
 	};
 
 	bt-wake-hog {
 		gpio-hog;
 		gpios = <19 GPIO_ACTIVE_HIGH>;		/* GPIO 83 host_wake_bt */
 		output-high;
-		line-name = "host_wake_bt";
+		line-name = "host-wake-bt";
 	};
+};
+
+&gpd {
+	gpio-line-names = "", "", "otg-id-detect", "gt911-reset",
+		"sgm31324-enable";
 };
 
 &pinctrl {
 	/* AXP2101 INT is open-drain active-low; stock leaves PC23 high at idle. */
 	pins_axp_irq: axp-irq {
 		pins = "PC23";
+		bias-pull-up;
+	};
+	pins_keys: keys {
+		pins = "PB11", "PB12", "PB13", "PB15", "PB28", "PB31";
+		bias-pull-up;
+	};
+	pins_touch: touch {
+		pins = "PC21", "PD3";
 		bias-pull-up;
 	};
 	pins_pwm0: pwm0 {
@@ -601,6 +661,7 @@
 	pins_i2c2: i2c2 {
 		function = "i2c2";
 		groups = "i2c2-data";
+		bias-pull-up;
 	};
 	pins_sfc: sfc {
 		function = "sfc";
